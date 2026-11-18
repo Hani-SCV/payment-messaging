@@ -1,97 +1,143 @@
-# Payment Callback Assignment
+# Payment Messaging
 
-다중 결제 서비스의 콜백 처리 로직을 구현한 Backend Assignment입니다.
+결제 시스템을 기반으로 **Transactional Outbox Pattern과 Apache Kafka를 활용한 비동기 메시징 아키텍처**를 학습하는 프로젝트입니다.
 
-Toss, Stripe, Alipay의 서로 다른 콜백 요청 형식을 처리하고, 결제 및 주문 상태를 안전하게 변경하도록 구현했습니다.
+결제 처리 과정에서 발생하는 이벤트를 Outbox 테이블에 원자적으로 저장하고, 별도의 Publisher가 Kafka로 발행한 뒤 Consumer가 이를 수신하여 후속 작업을 처리하는 구조를 구현합니다.
 
-## Implementations
-
-동일한 요구사항을 기준으로 다음 구현을 진행했습니다.
-
-* Go
-* FastAPI
-* NestJS
-
-각 구현은 별도의 브랜치에서 관리합니다.
-
-## 주요 구현
-
-* Toss 결제 완료 콜백
-* Stripe Checkout webhook
-* Alipay notify
-* 결제 및 주문 상태 검증
-* 금액 및 통화 검증
-* 중복 콜백 멱등성 처리
-* 동시 콜백에 대한 트랜잭션 및 Row Lock
-* Payment Event 기록
-* Outbox Message 기록
-* 오류 발생 시 트랜잭션 롤백
-* Provider별 콜백 요청 형식 처리
-
-## API
-
-| Provider | Endpoint | Content-Type |
-| -------- | -------- | ------------ |
-| Toss | `POST /v1/payment-callbacks/toss/return` | JSON |
-| Stripe | `POST /v1/payment-callbacks/stripe/webhook` | JSON |
-| Alipay | `POST /v1/payment-callbacks/alipay/notify` | Form URL Encoded |
-
-## Go Implementation
-
-Go 구현에서는 다음 구조로 구성했습니다.
+## Architecture
 
 ```text
-Handler
-   ↓
-Service
-   ↓
-Repository
-   ↓
-MySQL
+                   Payment API
+                       |
+                       v
+                 MySQL Transaction
+                  /           \
+             Payment         Outbox
+                                |
+                                v
+                       Outbox Publisher
+                                |
+                                v
+                          Kafka Broker
+                                |
+                                v
+                       Payment Consumer
+                                |
+                                v
+                       Event Processing
 ```
 
-트랜잭션은 Service 계층에서 관리하며, 하나의 콜백 처리 과정에서 Payment, Order, PaymentEvent, Outbox를 원자적으로 처리합니다.
+각 애플리케이션은 독립적으로 실행 및 배포할 수 있도록 분리하며, Gradle Multi-Project 구조로 하나의 저장소에서 관리합니다.
 
-동시 콜백에 대해서는 DB Row Lock을 사용해 동일한 결제에 대한 중복 처리를 방지합니다.
+## Modules
 
-## FastAPI Implementation
+| Module | Responsibility |
+|---|---|
+| `payment-api` | 결제 요청 처리 및 Payment, Outbox 저장 |
+| `outbox-publisher` | Outbox 이벤트 조회 및 Kafka 발행 |
+| `payment-consumer` | Kafka 이벤트 수신 및 후속 처리 |
 
-FastAPI 구현에서는 다음 구조로 구성했습니다.
+### Payment API
 
-```text
-Router
-   ↓
-Service
-   ↓
-SQLAlchemy
-   ↓
-MySQL
-```
+결제 요청을 처리하고 Payment와 Outbox 이벤트를 하나의 DB 트랜잭션으로 저장합니다.
 
-트랜잭션과 DB 조회 및 변경은 Service 계층에서 SQLAlchemy Session을 직접 사용해 처리합니다.
+결제 데이터와 이벤트 데이터의 원자성을 보장하여, 결제 처리는 완료됐지만 이벤트가 발행되지 않는 문제를 방지하는 것이 목적입니다.
 
-하나의 콜백 처리 과정에서 Payment, Order, PaymentEvent, Outbox를 하나의 트랜잭션으로 처리하며, 동시 콜백에 대해서는 DB Row Lock을 사용합니다.
+### Outbox Publisher
+
+Outbox 테이블에서 아직 발행되지 않은 이벤트를 조회하고 Kafka로 발행합니다.
+
+이벤트 발행 성공 및 실패에 따른 재시도와 발행 상태 관리 등을 구현할 예정입니다.
+
+### Payment Consumer
+
+Kafka에서 결제 이벤트를 수신하고 후속 작업을 처리합니다.
+
+중복 메시지 수신에 대비한 멱등성 처리와 메시지 처리 실패에 대한 대응을 구현할 예정입니다.
 
 ## Tech Stack
 
-### Go
+| Category | Technology |
+|---|---|
+| Language | Java 21 |
+| Framework | Spring Boot 4.1.2 |
+| Build | Gradle 9.8.2 |
+| Database | MySQL 8.4 |
+| ORM | Spring Data JPA |
+| Messaging | Apache Kafka 4.4.0 |
+| Kafka Mode | KRaft |
+| Mapping | MapStruct |
+| Container | Docker Compose |
+| Test | JUnit 5, Spring Boot Test |
 
-* Go
-* net/http
-* GORM
-* MySQL
-* Docker
-* Testify
+## Infrastructure
 
-### FastAPI
+Docker Compose를 통해 MySQL과 Kafka를 실행합니다.
 
-* Python
-* FastAPI
-* SQLAlchemy
-* MySQL
-* Docker
-* Pytest
+| Service | Version | Port |
+|---|---|---|
+| MySQL | 8.4 | 53306 |
+| Kafka | 4.4.0 | 9094 |
 
-## 원본 과제
+Kafka는 ZooKeeper 없이 KRaft 모드로 구성했으며, 초기 학습 환경에서는 단일 Broker를 사용합니다.
 
-전체 과제 요구사항과 참고 자료는 [`docs/ASSIGNMENT.md`](docs/ASSIGNMENT.md)에서 확인할 수 있습니다.
+### Kafka Topic
+
+| Topic | Partitions | Replication Factor |
+|---|---:|---:|
+| `payment-events` | 3 | 1 |
+
+## Getting Started
+
+### Requirements
+
+- Java 21
+- Docker
+- Docker Compose
+
+### 1. Infrastructure 실행
+
+```bash
+docker compose up -d
+```
+
+### 2. Gradle Build
+
+```bash
+./gradlew clean build
+```
+
+### 3. Application 실행
+
+각 모듈은 독립적으로 실행할 수 있습니다.
+
+```bash
+# Payment API
+./gradlew :payment-api:bootRun
+
+# Outbox Publisher
+./gradlew :outbox-publisher:bootRun
+
+# Payment Consumer
+./gradlew :payment-consumer:bootRun
+```
+
+## Learning Goals
+
+- Transactional Outbox Pattern
+- Kafka Producer / Consumer
+- 비동기 이벤트 기반 아키텍처
+- DB Transaction과 메시지 발행 간의 원자성 문제
+- At-least-once Delivery와 멱등성
+- 메시지 재시도 및 장애 처리
+- Kafka Partition과 Consumer Group
+- 서비스 간 책임 분리 및 독립적인 확장
+
+## Related Documents
+
+기존 결제 콜백 과제의 요구사항과 테스트 데이터는 다음 문서에서 확인할 수 있습니다.
+
+- [Assignment](docs/ASSIGNMENT.md)
+- [Incident](docs/INCIDENT_2025_11.md)
+- [Payload Provenance](docs/PAYLOAD_PROVENANCE.md)
+- [Requirements Memo](docs/REQUIREMENTS_MEMO.md)

@@ -1,0 +1,6 @@
+
+rootProject.name = 'payment-messaging'
+
+include 'payment-api'
+include 'outbox-publisher'
+include 'payment-consumer'
