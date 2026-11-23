@@ -6,6 +6,8 @@ public record PaymentCompletedCommand(
     String paymentId,
     PaymentProvider provider,
     String externalTransactionId,
-    String amount,
-    String currency
+    String rawAmount,
+    String rawCurrency,
+    String eventType,
+    String paymentStatus
 ) {}
